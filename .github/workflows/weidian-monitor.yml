@@ -1,0 +1,71 @@
+name: Weidian Monitor
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      test_post:
+        description: "Plaats X producten als testbericht (0 = normaal)"
+        required: false
+        default: "0"
+        type: choice
+        options: ["0", "1", "3", "5", "10"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weidian-monitor
+  cancel-in-progress: false
+
+jobs:
+  check-shop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monitor
+        env:
+          # Shop-id uit de shoplink (shop<id>.v.weidian.com). Wijzig je dit,
+          # dan legt de volgende run eerst een nieuwe momentopname vast.
+          WEIDIAN_SHOP_ID: "1785487515"
+
+          # Naam in de footer van elke embed
+          SHOP_NAME: "Cola Studio"
+
+          # Het endpoint staat in main.py en klopt. Alleen invullen als
+          # Weidian het ooit wijzigt; {shop_id}, {offset} en {limit} worden
+          # dan automatisch ingevuld.
+          # WEIDIAN_API_URL: ""
+
+          # Gevuld door de keuzelijst bij een handmatige run
+          TEST_POST: ${{ inputs.test_post }}
+
+          # Foto's vierkant opvragen bij de CDN; op "false" bij problemen
+          SQUARE_IMAGES: "true"
+
+          # Items die geen echt product zijn, gescheiden door komma's
+          SKIP_PATTERNS: "万能链接,邮费,补拍,定金,尾款,差价,运费"
+
+          # Vaste CNY->USD koers als de live koers niet op te halen is
+          # USD_RATE: "0.14"
+
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          WEIDIAN_COOKIE: ${{ secrets.WEIDIAN_COOKIE }}
+        run: python -u main.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "weidian-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || git commit -m "chore: update shop snapshot"
+          git push
